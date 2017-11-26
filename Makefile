@@ -2,7 +2,9 @@ GPU=0
 CUDNN=0
 OPENCV=0
 OPENMP=0
-DEBUG=0
+DEBUG=1
+NOPTHREAD=1
+NOTIME=1
 
 ARCH= -gencode arch=compute_30,code=sm_30 \
       -gencode arch=compute_35,code=sm_35 \
@@ -19,12 +21,12 @@ ALIB=libdarknet.a
 EXEC=darknet
 OBJDIR=./obj/
 
-CC=gcc
+CC=riscv64-unknown-elf-gcc
 NVCC=nvcc 
-AR=ar
+AR=riscv64-unknown-elf-ar
 ARFLAGS=rcs
 OPTS=-Ofast
-LDFLAGS= -lm -pthread 
+LDFLAGS= -lm
 COMMON= -Iinclude/ -Isrc/
 CFLAGS=-Wall -Wno-unknown-pragmas -Wfatal-errors -fPIC
 
@@ -34,6 +36,16 @@ endif
 
 ifeq ($(DEBUG), 1) 
 OPTS=-O0 -g
+endif
+
+ifeq ($(NOPTHREAD), 1)
+CFLAGS += -DNO_PTHREAD
+else
+LDFLAGS += -lpthread
+endif
+
+ifeq ($(NOTIME), 1)
+CFLAGS += -DNO_TIME
 endif
 
 CFLAGS+=$(OPTS)
@@ -72,14 +84,14 @@ DEPS = $(wildcard src/*.h) Makefile include/darknet.h
 all: obj  results $(SLIB) $(ALIB) $(EXEC)
 
 
-$(EXEC): $(EXECOBJ) $(ALIB)
-	$(CC) $(COMMON) $(CFLAGS) $^ -o $@ $(LDFLAGS) $(ALIB)
+$(EXEC): $(EXECOBJ)
+	$(CC) $(COMMON) $(CFLAGS) $^ -o $@  $(OBJS) $(LDFLAGS)
 
 $(ALIB): $(OBJS)
 	$(AR) $(ARFLAGS) $@ $^
 
 $(SLIB): $(OBJS)
-	$(CC) $(CFLAGS) -shared $^ -o $@ $(LDFLAGS)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 $(OBJDIR)%.o: %.c $(DEPS)
 	$(CC) $(COMMON) $(CFLAGS) -c $< -o $@

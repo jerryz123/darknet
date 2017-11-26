@@ -3,8 +3,16 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
+#ifndef NO_PTHREAD
 #include <pthread.h>
-
+#else
+#define pthread_t int
+#endif
 #define SECRET_NUM -1234
 extern int gpu_index;
 
@@ -30,6 +38,10 @@ extern int gpu_index;
     #include "opencv2/imgcodecs/imgcodecs_c.h"
     #endif
     #endif
+#endif
+
+#ifdef NO_PTHREAD
+static void pthread_join(int a, int b) { };
 #endif
 
 typedef struct{
@@ -577,7 +589,9 @@ typedef struct list{
     node *back;
 } list;
 
+#ifndef NO_PTHREAD
 pthread_t load_data(load_args args);
+#endif
 list *read_data_cfg(char *filename);
 list *read_cfg(char *filename);
 unsigned char *read_file(char *filename);
@@ -730,7 +744,9 @@ image get_image_from_stream(CvCapture *cap);
 #endif
 void free_image(image m);
 float train_network(network *net, data d);
+#ifndef NO_PTHREAD
 pthread_t load_data_in_thread(load_args args);
+#endif
 void load_data_blocking(load_args args);
 list *get_paths(char *filename);
 void hierarchy_predictions(float *predictions, int n, tree *hier, int only_leaves, int stride);

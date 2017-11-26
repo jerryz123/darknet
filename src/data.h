@@ -1,6 +1,8 @@
 #ifndef DATA_H
 #define DATA_H
+#ifndef NO_PTHREAD
 #include <pthread.h>
+#endif
 
 #include "darknet.h"
 #include "matrix.h"

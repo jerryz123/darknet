@@ -783,6 +783,7 @@ int print_game(float *board, FILE *fp)
 
 int stdin_ready()
 {
+#ifndef NO_PTHREAD
     fd_set readfds;
     FD_ZERO(&readfds);
 
@@ -790,11 +791,13 @@ int stdin_ready()
     timeout.tv_sec = 0;
     timeout.tv_usec = 0;
     FD_SET(STDIN_FILENO, &readfds);
-
     if (select(1, &readfds, NULL, NULL, &timeout)){
         return 1;
     }
     return 0;
+#else
+    return 1;
+#endif
 }
 
 mcts_tree *ponder(mcts_tree *tree, network *net, float *b, float *ko, int player, float cpuct)
@@ -812,6 +815,7 @@ mcts_tree *ponder(mcts_tree *tree, network *net, float *b, float *ko, int player
 
 void engine_go(char *filename, char *weightfile, int mcts_iters, float secs, float temp, float cpuct, int anon, int resign)
 {
+#ifndef NO_PTHREAD
     mcts_tree *root = 0;
     network *net = load_network(filename, weightfile, 0);
     set_batch_network(net, 1);
@@ -1093,6 +1097,9 @@ void engine_go(char *filename, char *weightfile, int mcts_iters, float secs, flo
         fflush(stderr);
     }
     printf("%d %d %d\n",passed, black_stones_left, white_stones_left);
+#else
+    printf("NOT SUPPORTED\n");
+#endif
 }
 
 void test_go(char *cfg, char *weights, int multi)
@@ -1186,6 +1193,7 @@ void test_go(char *cfg, char *weights, int multi)
 
 float score_game(float *board)
 {
+#ifndef NO_PTHREAD
     int i;
     FILE *f = fopen("game.txt", "w");
     int count = print_game(board, f);
@@ -1208,6 +1216,10 @@ float score_game(float *board)
     if(player == 'W') score = -score;
     pclose(p);
     return score;
+#else
+    printf("NOT SUPPORTED\n");
+    return 0;
+#endif
 }
 
 void self_go(char *filename, char *weightfile, char *f2, char *w2, int multi)
@@ -1253,7 +1265,7 @@ void self_go(char *filename, char *weightfile, char *f2, char *w2, int multi)
             else ++p2;
             ++total;
             fprintf(stderr, "Total: %d, Player 1: %f, Player 2: %f\n", total, (float)p1/total, (float)p2/total);
-            sleep(1);
+            //sleep(1);
             /*
                int i = (score > 0)? 0 : 1;
                int j;
