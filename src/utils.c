@@ -23,16 +23,21 @@ double get_wall_time()
 }
 */
 
+#ifndef NO_TIME
 double what_time_is_it_now()
 {
     struct timespec now;
-#ifndef NO_TIME
     clock_gettime(CLOCK_REALTIME, &now);
     return now.tv_sec + now.tv_nsec*1e-9;
-#else
-    return 0;
-#endif
 }
+#else
+size_t what_time_is_it_now()
+{
+    int out = 0;
+    asm volatile ("rdcycle %0" : "=r" (out));
+    return out;
+}
+#endif
 
 int *read_intlist(char *gpu_list, int *ngpus, int d)
 {

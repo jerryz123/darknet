@@ -5,16 +5,31 @@
 #include "darknet.h"
 #include "list.h"
 
+#ifndef NO_TIME
 #define TIME(a) \
     do { \
     double start = what_time_is_it_now(); \
     a; \
     printf("%s took: %f seconds\n", #a, what_time_is_it_now() - start); \
     } while (0)
+#else
+#define TIME(a) \
+    do { \
+    size_t start = what_time_is_it_now(); \
+    a; \
+    printf("%s took: %d seconds\n", #a, what_time_is_it_now() - start); \
+    } while (0)
+#endif
 
 #define TWO_PI 6.2831853071795864769252866f
 
+#ifndef NO_TIME
 double what_time_is_it_now();
+#else
+size_t what_time_is_it_now();
+#endif
+
+
 void shuffle(void *arr, size_t n, size_t size);
 void sorta_shuffle(void *arr, size_t n, size_t size, size_t sections);
 void free_ptrs(void **ptrs, int n);

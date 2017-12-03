@@ -4,7 +4,6 @@ OPENCV=0
 OPENMP=0
 DEBUG=1
 NOPTHREAD=1
-NOTIME=1
 
 ARCH= -gencode arch=compute_30,code=sm_30 \
       -gencode arch=compute_35,code=sm_35 \
@@ -21,14 +20,15 @@ ALIB=libdarknet.a
 EXEC=darknet
 OBJDIR=./obj/
 
-CC=riscv64-unknown-elf-gcc
+CC=/scratch/jerryz/hwacha-build/build-tools/bin/riscv64-unknown-elf-gcc
+OBJDUMP=/scratch/jerryz/hwacha-build/build-tools/bin/riscv64-unknown-elf-objdump
 NVCC=nvcc 
 AR=riscv64-unknown-elf-ar
 ARFLAGS=rcs
-OPTS=-Ofast
+OPTS=-O0
 LDFLAGS= -lm
 COMMON= -Iinclude/ -Isrc/
-CFLAGS=-Wall -Wno-unknown-pragmas -Wfatal-errors -fPIC
+CFLAGS=-Wall -Wno-unknown-pragmas -Wfatal-errors -fPIC -march=RV64IMAFDXhwacha -fverbose-asm -ffast-math -static -fno-common -g
 
 ifeq ($(OPENMP), 1) 
 CFLAGS+= -fopenmp
@@ -44,9 +44,8 @@ else
 LDFLAGS += -lpthread
 endif
 
-ifeq ($(NOTIME), 1)
-CFLAGS += -DNO_TIME
-endif
+CFLAGS += -DNO_TIME -DNO_ALPHABET
+
 
 CFLAGS+=$(OPTS)
 
@@ -69,7 +68,7 @@ CFLAGS+= -DCUDNN
 LDFLAGS+= -lcudnn
 endif
 
-OBJ=gemm.o utils.o cuda.o deconvolutional_layer.o convolutional_layer.o list.o image.o activations.o im2col.o col2im.o blas.o crop_layer.o dropout_layer.o maxpool_layer.o softmax_layer.o data.o matrix.o network.o connected_layer.o cost_layer.o parser.o option_list.o detection_layer.o route_layer.o box.o normalization_layer.o avgpool_layer.o layer.o local_layer.o shortcut_layer.o activation_layer.o rnn_layer.o gru_layer.o crnn_layer.o demo.o batchnorm_layer.o region_layer.o reorg_layer.o tree.o  lstm_layer.o
+OBJ=gemm.o utils.o cuda.o deconvolutional_layer.o convolutional_layer.o list.o image.o activations.o im2col.o col2im.o blas.o crop_layer.o dropout_layer.o maxpool_layer.o softmax_layer.o data.o matrix.o network.o connected_layer.o cost_layer.o parser.o option_list.o detection_layer.o route_layer.o box.o normalization_layer.o avgpool_layer.o layer.o local_layer.o shortcut_layer.o activation_layer.o rnn_layer.o gru_layer.o crnn_layer.o demo.o batchnorm_layer.o region_layer.o reorg_layer.o tree.o  lstm_layer.o util.o util_asm.o
 EXECOBJA=captcha.o lsd.o super.o art.o tag.o cifar.o go.o rnn.o segmenter.o regressor.o classifier.o coco.o yolo.o detector.o nightmare.o attention.o darknet.o
 ifeq ($(GPU), 1) 
 LDFLAGS+= -lstdc++ 
@@ -81,11 +80,14 @@ OBJS = $(addprefix $(OBJDIR), $(OBJ))
 DEPS = $(wildcard src/*.h) Makefile include/darknet.h
 
 #all: obj backup results $(SLIB) $(ALIB) $(EXEC)
-all: obj  results $(SLIB) $(ALIB) $(EXEC)
+#all: obj  results $(SLIB) $(ALIB) $(EXEC)
+all: $(EXEC) $(EXEC).dump
 
+%.dump : %
+	$(OBJDUMP) -d $^ > $@
 
-$(EXEC): $(EXECOBJ)
-	$(CC) $(COMMON) $(CFLAGS) $^ -o $@  $(OBJS) $(LDFLAGS)
+$(EXEC): $(EXECOBJ) $(OBJS)
+	$(CC) $(COMMON) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 $(ALIB): $(OBJS)
 	$(AR) $(ARFLAGS) $@ $^
@@ -94,6 +96,9 @@ $(SLIB): $(OBJS)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 $(OBJDIR)%.o: %.c $(DEPS)
+	$(CC) $(COMMON) $(CFLAGS) -c $< -o $@
+
+$(OBJDIR)%.o: %.S $(DEPS)
 	$(CC) $(COMMON) $(CFLAGS) -c $< -o $@
 
 $(OBJDIR)%.o: %.cu $(DEPS)

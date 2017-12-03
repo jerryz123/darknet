@@ -4,10 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <sys/select.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include "util.h"
 #ifndef NO_PTHREAD
 #include <pthread.h>
 #else
@@ -707,7 +707,7 @@ void random_distort_image(image im, float hue, float saturation, float exposure)
 void fill_image(image m, float s);
 image grayscale_image(image im);
 void rotate_image_cw(image im, int times);
-double what_time_is_it_now();
+//double what_time_is_it_now();
 image rotate_image(image m, float rad);
 void visualize_network(network *net);
 float box_iou(box a, box b);

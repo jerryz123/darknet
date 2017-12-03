@@ -31,13 +31,13 @@ void average(int argc, char *argv[])
     network *net = parse_network_cfg(cfgfile);
     network *sum = parse_network_cfg(cfgfile);
 
-    char *weightfile = argv[4];   
+    char *weightfile = argv[4];
     load_weights(sum, weightfile);
 
     int i, j;
     int n = argc - 5;
     for(i = 0; i < n; ++i){
-        weightfile = argv[i+5];   
+        weightfile = argv[i+5];
         load_weights(net, weightfile);
         for(j = 0; j < net->n; ++j){
             layer l = net->layers[j];
@@ -381,12 +381,200 @@ void visualize(char *cfgfile, char *weightfile)
     cvWaitKey(0);
 #endif
 }
+void test_gemm_nn(int M, int N, int K,
+             float ALPHA,
+             float *A, int lda,
+             float *B, int ldb,
+             float *C, int ldc)
+{
+  int i, j, k;
+    #pragma omp parallel for
+    for(i = 0; i < M; ++i){
+        for(k = 0; k < K; ++k){
+            register float A_PART = ALPHA*A[i*lda+k];
+            for(j = 0; j < N; ++j){
+                C[i*ldc+j] += A_PART*B[k*ldb+j];
+            }
+        }
+    }
+}
+void test_gemm_nn_hwacha(int M, int N, int K,
+                      float ALPHA,
+                      float* A, int lda,
+                      float* B, int ldb,
+                      float* C, int ldc)
+{
+   asm volatile ("vsetcfg %0" : : "r" (VCFG(0, 8, 0, 1)));
+
+   int vlen_result;
+   asm volatile ("vsetvl %0, %1" : "=r" (vlen_result) : "r" (N));
+
+   void * vpset_vfblockaddr;
+   asm volatile ("la %0, sgemm_opt_v_4_4_vpset" : "=r" (vpset_vfblockaddr));
+
+   asm volatile ("vf 0(%0)" : : "r" (vpset_vfblockaddr));
+
+   void * pre_vfblockaddr;
+   void * pre_edge_vfblockaddr;
+   void * main_vfblockaddr;
+   void * main_edge0_vfblockaddr;
+   void * main_edge1_vfblockaddr;
+   void * post_vfblockaddr;
+   void * post_edge_vfblockaddr;
+   asm volatile ("la %0, sgemm_opt_v_4_4_pre" : "=r" (pre_vfblockaddr));
+   asm volatile ("lw t0, 0(%0)" : : "r" (pre_vfblockaddr) : "t0");
+   asm volatile ("la %0, sgemm_opt_v_4_4_pre_edge" : "=r" (pre_edge_vfblockaddr));
+   asm volatile ("lw t0, 0(%0)" : : "r" (pre_edge_vfblockaddr) : "t0");
+   asm volatile ("la %0, sgemm_opt_v_4_4" : "=r" (main_vfblockaddr));
+   asm volatile ("lw t0, 0(%0)" : : "r" (main_vfblockaddr) : "t0");
+   asm volatile ("la %0, sgemm_opt_v_4_4_edge0" : "=r" (main_edge0_vfblockaddr));
+   asm volatile ("lw t0, 0(%0)" : : "r" (main_edge0_vfblockaddr) : "t0");
+   asm volatile ("la %0, sgemm_opt_v_4_4_edge1" : "=r" (main_edge1_vfblockaddr));
+   asm volatile ("lw t0, 0(%0)" : : "r" (main_edge1_vfblockaddr) : "t0");
+   asm volatile ("la %0, sgemm_opt_v_4_4_post" : "=r" (post_vfblockaddr));
+   asm volatile ("lw t0, 0(%0)" : : "r" (post_vfblockaddr) : "t0");
+   asm volatile ("la %0, sgemm_opt_v_4_4_post_edge" : "=r" (post_edge_vfblockaddr));
+   asm volatile ("lw t0, 0(%0)" : : "r" (post_edge_vfblockaddr) : "t0");
+   int i;
+   for (i = 0; i + 4 <= M; i+=4) {
+     for (int k = 0; k < N; ) {
+       int consumed;
+       int artificial = N - k;
+
+       asm volatile ("vsetvl %0, %1" : "=r" (consumed) : "r" (artificial));
+
+       // C rows 1, 2, 3, 4
+       asm volatile ("vmca va0, %0" : : "r" (&C[i*ldc+k]));
+       asm volatile ("vmca va1, %0" : : "r" (&C[(i+1)*ldc+k]));
+       asm volatile ("vmca va2, %0" : : "r" (&C[(i+2)*ldc+k]));
+       asm volatile ("vmca va3, %0" : : "r" (&C[(i+3)*ldc+k]));
+
+       asm volatile ("vf 0(%0)" : : "r" (pre_vfblockaddr));
+       int j;
+       for (j = 0; j + 4 <= K; j+=4) {
+
+         // B row 1, 2, 3, 4
+         asm volatile ("vmca va4, %0" : : "r" (&B[j*ldb+k]));
+         asm volatile ("vmca va5, %0" : : "r" (&B[(j+1)*ldb+k]));
+         asm volatile ("vmca va6, %0" : : "r" (&B[(j+2)*ldb+k]));
+         asm volatile ("vmca va7, %0" : : "r" (&B[(j+3)*ldb+k]));
+
+         // A row 1, 2, 3, 4
+         asm volatile ("vmcs vs1, %0\n"
+                       "vmcs vs2, %1\n"
+                       "vmcs vs3, %2\n"
+                       "vmcs vs4, %3\n"
+
+                       "vmcs vs5, %4\n"
+                       "vmcs vs6, %5\n"
+                       "vmcs vs7, %6\n"
+                       "vmcs vs8, %7\n"
+
+                       "vmcs vs9, %8\n"
+                       "vmcs vs10, %9\n"
+                       "vmcs vs11, %10\n"
+                       "vmcs vs12, %11\n"
+
+                       "vmcs vs13, %12\n"
+                       "vmcs vs14, %13\n"
+                       "vmcs vs15, %14\n"
+                       "vmcs vs16, %15"
+                       :
+                       : "r" (ALPHA*A[j+(i+0)*lda+0]), "r" (ALPHA*A[j+(i+0)*lda+1]), "r" (ALPHA*A[j+(i+0)*lda+2]), "r" (ALPHA*A[j+(i+0)*lda+3]),
+                         "r" (ALPHA*A[j+(i+1)*lda+0]), "r" (ALPHA*A[j+(i+1)*lda+1]), "r" (ALPHA*A[j+(i+1)*lda+2]), "r" (ALPHA*A[j+(i+1)*lda+3]),
+                         "r" (ALPHA*A[j+(i+2)*lda+0]), "r" (ALPHA*A[j+(i+2)*lda+1]), "r" (ALPHA*A[j+(i+2)*lda+2]), "r" (ALPHA*A[j+(i+2)*lda+3]),
+                         "r" (ALPHA*A[j+(i+3)*lda+0]), "r" (ALPHA*A[j+(i+3)*lda+1]), "r" (ALPHA*A[j+(i+3)*lda+2]), "r" (ALPHA*A[j+(i+3)*lda+3])
+                       );
+
+         asm volatile ("vf 0(%0)" : : "r" (main_vfblockaddr));
+       }
+
+       for ( ; j < K; j++) {
+         asm volatile ("vmca va4, %0" : : "r" (&B[j*ldb+k]));
+
+         asm volatile ("vmcs vs1, %0\n"
+
+                       "vmcs vs5, %1\n"
+
+                       "vmcs vs9, %2\n"
+
+                       "vmcs vs13, %3\n"
+                       :
+                       : "r" (ALPHA*A[j+(i+0)*lda+0]),
+                         "r" (ALPHA*A[j+(i+1)*lda+0]),
+                         "r" (ALPHA*A[j+(i+2)*lda+0]),
+                         "r" (ALPHA*A[j+(i+3)*lda+0])
+                       );
+         asm volatile ("vf 0(%0)" : : "r" (main_edge0_vfblockaddr));
+
+       }
+       asm volatile ("vf 0(%0)" : : "r" (post_vfblockaddr));
+       k += consumed;
+     }
+   }
+
+   for ( ; i < M; i++) {
+     for (int k = 0; k < N; ) {
+       int consumed;
+       int artificial = N - k;
+
+       asm volatile ("vsetvl %0, %1" : "=r" (consumed) : "r" (artificial));
+       asm volatile ("vmca va0, %0" : : "r" (&C[i*ldc+k]));
+
+       asm volatile ("vf 0(%0)" : : "r" (pre_edge_vfblockaddr));
+
+       for (int j = 0; j < K; j++) {
+         asm volatile ("vmca va4, %0" : : "r" (&B[j*ldb+k]));
+         asm volatile ("vmcs vs1, %0" : : "r" (ALPHA*A[j+(i+0)*lda+0]));
+         asm volatile ("vf 0(%0)" : : "r" (main_edge1_vfblockaddr));
+       }
+       asm volatile ("vf 0(%0)" : : "r" (post_edge_vfblockaddr));
+       k += consumed;
+     }
+   }
+   asm volatile ("fence");
+}
+
+void test_gemm()
+{
+  int M = 15;
+  int N = 13;
+  int K = 14;
+  float* A = safe_malloc(sizeof(float)*M*K);
+  float* B = safe_malloc(sizeof(float)*N*K);
+  float* C = safe_malloc(sizeof(float)*M*N);
+  double ALPHA = 2.0;
+
+  fill (A, M*K, 0);
+  fill (B, N*K, 0);
+
+  memset (C, 0, M*N*sizeof(int));
+
+  printfloatmatrix(1, K, M, A);
+  printfloatmatrix(1, N, K, B);
+  printfloatmatrix(1, N, M, C);
+  test_gemm_nn(M, N, K,
+               ALPHA,
+               A, K, B, N,
+               C, N);
+
+  printfloatmatrix(1, N, M, C);
+  memset (C, 0, M*N*sizeof(int));
+
+  test_gemm_nn_hwacha(M, N, K,
+          ALPHA,
+          A, K, B, N,
+          C, N);
+  printfloatmatrix(1, N, M, C);
+}
 
 int main(int argc, char **argv)
 {
     //test_resize("data/bad.jpg");
     //test_box();
     //test_convolutional_layer();
+    //test_gemm();
+    //return 0;
     if(argc < 2){
         fprintf(stderr, "usage: %s <function>\n", argv[0]);
         return 0;
@@ -485,4 +673,3 @@ int main(int argc, char **argv)
     }
     return 0;
 }
-

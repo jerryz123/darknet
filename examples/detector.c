@@ -55,7 +55,11 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     args.threads = 64;
 
     pthread_t load_thread = load_data(args);
+#ifndef NO_TIME
     double time;
+#else
+    int time;
+#endif
     int count = 0;
     //while(i*imgs < N*120){
     while(get_current_batch(net) < net->max_batches){
@@ -565,10 +569,16 @@ void validate_detector_recall(char *cfgfile, char *weightfile)
 void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filename, float thresh, float hier_thresh, char *outfile, int fullscreen)
 {
     list *options = read_data_cfg(datacfg);
+
     char *name_list = option_find_str(options, "names", "data/names.list");
     char **names = get_labels(name_list);
 
+#ifndef NO_ALPHABET
     image **alphabet = load_alphabet();
+#else
+    image **alphabet = NULL;
+#endif
+
     network *net = load_network(cfgfile, weightfile, 0);
     set_batch_network(net, 1);
     srand(2222222);
@@ -606,12 +616,21 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
 
         float *X = sized.data;
         time=what_time_is_it_now();
+        size_t cycle_start = rdcycle();
         network_predict(net, X);
+        size_t cycle_end = rdcycle();
+        printf("%d\t%d\n", cycle_start, cycle_end);
+#ifndef NO_TIME
         printf("%s: Predicted in %f seconds.\n", input, what_time_is_it_now()-time);
+#else
+        printf("%s: Predicted in %d seconds.\n", input, what_time_is_it_now()-time);
+#endif
         get_region_boxes(l, im.w, im.h, net->w, net->h, thresh, probs, boxes, masks, 0, 0, hier_thresh, 1);
         //if (nms) do_nms_obj(boxes, probs, l.w*l.h*l.n, l.classes, nms);
         if (nms) do_nms_sort(boxes, probs, l.w*l.h*l.n, l.classes, nms);
+
         draw_detections(im, l.w*l.h*l.n, thresh, boxes, probs, masks, names, alphabet, l.classes);
+
         if(outfile){
             save_image(im, outfile);
         }
