@@ -126,15 +126,51 @@ void variance_cpu(float *x, float *mean, int batch, int filters, int spatial, fl
 void normalize_cpu(float *x, float *mean, float *variance, int batch, int filters, int spatial)
 {
     int b, f, i;
+    setvcfg(0, 1, 0, 1);
+    asm volatile ("vmcs vs3, %0" : : "r" (0.000001f));
     for(b = 0; b < batch; ++b){
         for(f = 0; f < filters; ++f){
-            for(i = 0; i < spatial; ++i){
-                int index = b*filters*spatial + f*spatial + i;
-                x[index] = (x[index] - mean[f])/(sqrt(variance[f]) + .000001f);
+          asm volatile ("vmcs vs1, %0" : : "r" (mean[f]));
+          asm volatile ("vmcs vs2, %0" : : "r" (variance[f]));
+          for (i = 0; i < spatial ;)
+            {
+              int consumed = setvlen(spatial - i);
+              asm volatile ("vmca va0, %0" : : "r" (&x[b*filters*spatial + f*spatial + i]));
+              asm volatile ("la t0, vnormalize_cpu" : : : "t0");
+              asm volatile ("lw t1, 0(t0)");
+              asm volatile ("vf 0(t0)");
+              i += consumed;
             }
         }
     }
+    asm volatile ("fence");
 }
+
+void normalize_cpu_h(int16_t *x, int16_t *mean, int16_t *variance, int batch, int filters, int spatial)
+{
+    int b, f, i;
+    setvcfg(0, 0, 1, 1);
+    asm volatile ("vmcs vs3, %0" : : "r" (0.000001f));
+    for(b = 0; b < batch; ++b){
+        for(f = 0; f < filters; ++f){
+          asm volatile ("vmcs vs1, %0" : : "r" (mean[f]));
+          asm volatile ("vmcs vs2, %0" : : "r" (variance[f]));
+          for (i = 0; i < spatial ;)
+            {
+              int consumed = setvlen(spatial - i);
+              asm volatile ("vmca va0, %0" : : "r" (&x[b*filters*spatial + f*spatial + i]));
+              asm volatile ("la t0, vnormalize_cpu_h" : : : "t0");
+              asm volatile ("lw t1, 0(t0)");
+              asm volatile ("vf 0(t0)");
+              i += consumed;
+            }
+        }
+    }
+    asm volatile ("fence");
+}
+
+
+
 
 void const_cpu(int N, float ALPHA, float *X, int INCX)
 {
@@ -168,8 +204,108 @@ void scal_cpu(int N, float ALPHA, float *X, int INCX)
 
 void fill_cpu(int N, float ALPHA, float *X, int INCX)
 {
+   if (INCX == 1)
+    {
+      int i;
+      setvcfg(0, 1, 0, 1);
+      asm volatile ("vmcs vs1, %0"
+                    :
+                    : "r" (ALPHA));
+      for (i = 0; i < N; )
+        {
+          int consumed = setvlen (N - i);
+          asm volatile ("vmca va0, %0"
+                        :
+                        : "r" (&X[i]));
+          asm volatile ("la t0, vfill_rv_cpu_1"
+                        :
+                        :
+                        : "t0");
+          asm volatile ("lw t1, 0(t0)");
+          asm volatile ("vf 0(t0)");
+          i += consumed;
+        }
+      asm volatile ("fence");
+    }
+  else {
     int i;
-    for(i = 0; i < N; ++i) X[i*INCX] = ALPHA;
+    setvcfg(0, 1, 0, 1);
+    asm volatile ("vmcs vs1, %0"
+                  :
+                  : "r" (ALPHA));
+    asm volatile ("vmca va1, %0"
+                  :
+                  : "r" (INCX*sizeof(float)));
+    for (i = 0; i < N; )
+      {
+        int consumed = setvlen (N - i);
+        asm volatile ("vmca va0, %0"
+                      :
+                      : "r" (&X[i*INCX]));
+        asm volatile ("la t0, vfill_rv_cpu"
+                      :
+                      :
+                      : "t0");
+        asm volatile ("lw t1, 0(t0)");
+        asm volatile ("vf 0(t0)");
+        i += consumed;
+      }
+    asm volatile ("fence");
+  }
+}
+
+void fill_cpu_h(int N, float ALPHA, int16_t * X, int INCX)
+{
+  if (INCX == 1)
+    {
+      int i;
+      setvcfg(0, 0, 1, 1);
+      asm volatile ("vmcs vs1, %0"
+                    :
+                    : "r" (ALPHA));
+      for (i = 0; i < N; )
+        {
+          int consumed = setvlen (N - i);
+          asm volatile ("vmca va0, %0"
+                        :
+                        : "r" (&X[i]));
+          asm volatile ("la t0, vfill_rv_cpu_h_1"
+                        :
+                        :
+                        : "t0");
+          asm volatile ("lw t1, 0(t0)");
+          asm volatile ("vf 0(t0)");
+          i += consumed;
+        }
+      asm volatile ("fence");
+    }
+  else
+    {
+      int i;
+      setvcfg(0, 0, 1, 1);
+      asm volatile ("vmcs vs1, %0"
+                    :
+                    : "r" (ALPHA));
+      asm volatile ("vmca va1, %0"
+                    :
+                    : "r" (INCX*sizeof(int16_t)));
+      for (i = 0; i < N; )
+        {
+          int consumed = setvlen (N - i);
+          asm volatile ("vmca va0, %0"
+                        :
+                        : "r" (&X[i*INCX]));
+          asm volatile ("la t0, vfill_rv_cpu_h"
+                        :
+                        :
+                        : "t0");
+          asm volatile ("lw t1, 0(t0)");
+          asm volatile ("vf 0(t0)");
+          i += consumed;
+        }
+      asm volatile ("fence");
+    }
+
 }
 
 void deinter_cpu(int NX, float *X, int NY, float *Y, int B, float *OUT)
@@ -204,10 +340,69 @@ void inter_cpu(int NX, float *X, int NY, float *Y, int B, float *OUT)
 
 void copy_cpu(int N, float *X, int INCX, float *Y, int INCY)
 {
-    int i;
-    for(i = 0; i < N; ++i) Y[i*INCY] = X[i*INCX];
+  if (INCX == 1 && INCY == 1)
+    {
+      int i;
+      setvcfg(0, 1, 0, 1);
+      for (i = 0; i < N; )
+        {
+          int consumed = setvlen (N - i);
+          asm volatile ("vmca va0, %0"
+                        :
+                        : "r" (&X[i]));
+          asm volatile ("vmca va1, %0"
+                        :
+                        : "r" (&Y[i]));
+          asm volatile ("la t0, vcopy_oo"
+                        :
+                        :
+                        : "t0");
+          asm volatile ("lw t1, 0(t0)");
+          asm volatile ("vf 0(t0)");
+          i += consumed;
+        }
+      asm volatile ("fence");
+
+    }
+  else
+    {
+      int i;
+      for(i = 0; i < N; ++i) Y[i*INCY] = X[i*INCX];
+    }
 }
 
+void copy_cpu_h(int N, int16_t* X, int INCX, int16_t* Y, int INCY)
+{
+  if (INCX == 1 && INCY == 1)
+    {
+      int i;
+      setvcfg(0, 0, 1, 1);
+      for (i = 0; i < N; )
+        {
+          int consumed = setvlen (N - i);
+          asm volatile ("vmca va0, %0"
+                        :
+                        : "r" (&X[i]));
+          asm volatile ("vmca va1, %0"
+                        :
+                        : "r" (&Y[i]));
+          asm volatile ("la t0, vcopy_oo_h"
+                        :
+                        :
+                        : "t0");
+          asm volatile ("lw t1, 0(t0)");
+          asm volatile ("vf 0(t0)");
+          i += consumed;
+        }
+      asm volatile ("fence");
+
+    }
+  else
+    {
+      int i;
+      for(i = 0; i < N; ++i) Y[i*INCY] = X[i*INCX];
+    }
+}
 void mult_add_into_cpu(int N, float *X, float *Y, float *Z)
 {
     int i;
@@ -287,4 +482,3 @@ void softmax_cpu(float *input, int n, int batch, int batch_offset, int groups, i
         }
     }
 }
-

@@ -319,7 +319,9 @@ layer parse_region(list *options, size_params params)
             l.biases[i] = bias;
             a = strchr(a, ',')+1;
         }
+        cvt_half_prec (l.biases, l.biases_h, n);
     }
+    
     return l;
 }
 detection_layer parse_detection(list *options, size_params params)
@@ -712,10 +714,6 @@ network *parse_network_cfg(char *filename)
             l = parse_dropout(options, params);
             l.output = net->layers[count-1].output;
             l.delta = net->layers[count-1].delta;
-#ifdef GPU
-            l.output_gpu = net->layers[count-1].output_gpu;
-            l.delta_gpu = net->layers[count-1].delta_gpu;
-#endif
         }else{
             fprintf(stderr, "Type not recognized: %s\n", s->type);
         }
@@ -745,24 +743,13 @@ network *parse_network_cfg(char *filename)
     net->truths = out.outputs;
     if(net->layers[net->n-1].truths) net->truths = net->layers[net->n-1].truths;
     net->output = out.output;
+    net->output_h = out.output_h;
     net->input = calloc(net->inputs*net->batch, sizeof(float));
     net->truth = calloc(net->truths*net->batch, sizeof(float));
-#ifdef GPU
-    net->output_gpu = out.output_gpu;
-    net->input_gpu = cuda_make_array(net->input, net->inputs*net->batch);
-    net->truth_gpu = cuda_make_array(net->truth, net->truths*net->batch);
-#endif
+
     if(workspace_size){
         //printf("%ld\n", workspace_size);
-#ifdef GPU
-        if(gpu_index >= 0){
-            net->workspace = cuda_make_array(0, (workspace_size-1)/sizeof(float)+1);
-        }else {
-            net->workspace = calloc(1, workspace_size);
-        }
-#else
         net->workspace = calloc(1, workspace_size);
-#endif
     }
     return net;
 }
@@ -1002,11 +989,6 @@ void load_batchnorm_weights(layer l, FILE *fp)
     fread(l.scales, sizeof(float), l.c, fp);
     fread(l.rolling_mean, sizeof(float), l.c, fp);
     fread(l.rolling_variance, sizeof(float), l.c, fp);
-#ifdef GPU
-    if(gpu_index >= 0){
-        push_batchnorm_layer(l);
-    }
-#endif
 }
 
 void load_convolutional_weights_binary(layer l, FILE *fp)
@@ -1032,73 +1014,30 @@ void load_convolutional_weights_binary(layer l, FILE *fp)
             }
         }
     }
-#ifdef GPU
-    if(gpu_index >= 0){
-        push_convolutional_layer(l);
-    }
-#endif
 }
 
 void load_convolutional_weights(layer l, FILE *fp)
 {
-    if(l.binary){
-        //load_convolutional_weights_binary(l, fp);
-        //return;
-    }
     int num = l.nweights;
     fread(l.biases, sizeof(float), l.n, fp);
+    cvt_half_prec(l.biases, l.biases_h, l.n);
     if (l.batch_normalize && (!l.dontloadscales)){
         fread(l.scales, sizeof(float), l.n, fp);
+        cvt_half_prec(l.scales, l.scales_h, l.n);
+        
         fread(l.rolling_mean, sizeof(float), l.n, fp);
+        cvt_half_prec(l.rolling_mean, l.rolling_mean_h, l.n);
+        
         fread(l.rolling_variance, sizeof(float), l.n, fp);
-        if(0){
-            int i;
-            for(i = 0; i < l.n; ++i){
-                printf("%g, ", l.rolling_mean[i]);
-            }
-            printf("\n");
-            for(i = 0; i < l.n; ++i){
-                printf("%g, ", l.rolling_variance[i]);
-            }
-            printf("\n");
-        }
-        if(0){
-            fill_cpu(l.n, 0, l.rolling_mean, 1);
-            fill_cpu(l.n, 0, l.rolling_variance, 1);
-        }
-        if(0){
-            int i;
-            for(i = 0; i < l.n; ++i){
-                printf("%g, ", l.rolling_mean[i]);
-            }
-            printf("\n");
-            for(i = 0; i < l.n; ++i){
-                printf("%g, ", l.rolling_variance[i]);
-            }
-            printf("\n");
-        }
+        cvt_half_prec(l.rolling_variance, l.rolling_variance_h, l.n);
     }
     fread(l.weights, sizeof(float), num, fp);
-    //if(l.c == 3) scal_cpu(num, 1./256, l.weights, 1);
-    if (l.flipped) {
-        transpose_matrix(l.weights, l.c*l.size*l.size, l.n);
-    }
-    //if (l.binary) binarize_weights(l.weights, l.n, l.c*l.size*l.size, l.weights);
-#ifdef GPU
-    if(gpu_index >= 0){
-        push_convolutional_layer(l);
-    }
-#endif
+    cvt_half_prec(l.weights, l.weights_h, num);
 }
 
 
 void load_weights_upto(network *net, char *filename, int start, int cutoff)
 {
-#ifdef GPU
-    if(net->gpu_index >= 0){
-        cuda_set_device(net->gpu_index);
-    }
-#endif
     fprintf(stderr, "Loading weights from %s...", filename);
     fflush(stdout);
     FILE *fp = fopen(filename, "rb");
@@ -1171,11 +1110,7 @@ void load_weights_upto(network *net, char *filename, int start, int cutoff)
             int size = l.size*l.size*l.c*l.n*locations;
             fread(l.biases, sizeof(float), l.outputs, fp);
             fread(l.weights, sizeof(float), size, fp);
-#ifdef GPU
-            if(gpu_index >= 0){
-                push_local_layer(l);
-            }
-#endif
+
         }
     }
     fprintf(stderr, "Done!\n");

@@ -10,6 +10,7 @@
 #define VRU_SWITCH 0x0
 #endif
 
+#include <stdint.h>
 
 
 #define VCFG(nvvd, nvvw, nvvh, nvp) \
@@ -28,6 +29,14 @@ void fill(float* p, int n, int mode);
 void setvcfg(int nd, int nw, int nh, int np);
 int setvlen(int vlen);
 void vec_gather(const int* id, const float* src, float* dest, int len);
+void vec_gather_h(const int* id, const int16_t* src, int16_t* dest, int len);
 void acc_gather(float* dest, int len, int stride, float* src, int* ids, int n_iter);
+void scalex(float* src, float a, int len);
+void scalex_h(int16_t* src, float a, int len);
 
+void addx(float* src, float a, int len);
+void addx_h(int16_t* src, int16_t a, int len);
+void cvt_half_prec (float* src, int16_t* dest, int len);
+void cvt_single_prec (int16_t* src, float* dest, int len);
+void hwacha_memcpy (int16_t* src, int16_t* dest, int len);
 #endif

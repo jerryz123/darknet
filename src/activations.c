@@ -91,13 +91,104 @@ float activate(float x, ACTIVATION a)
     }
     return 0;
 }
+void leaky_activate_v(float* x, const int n)
+{
+  setvcfg(0, 1, 0, 2);
+  asm volatile ("vmcs vs2, %0"
+                :
+                : "r" (0.1f));
+
+  for (int i = 0; i < n; )
+    {
+      int consumed = setvlen(n - i);
+      asm volatile ("vmca va0, %0"
+                    :
+                    : "r" (&x[i]));
+      asm volatile ("la t0, vleaky_activate"
+                    :
+                    :
+                    : "t0");
+        asm volatile ("lw t1, 0(t0)");
+        asm volatile ("vf 0(t0)");
+        i += consumed;
+    }
+  asm volatile ("fence");
+
+}
+
+void leaky_activate_vh(int16_t* x, const int n)
+{
+  float f;
+  setvcfg(0, 0, 1, 2);
+  float a = 0.1f;
+  asm volatile ("vmcs vs2, %0"
+                :
+                : "r" (a));
+
+  for (int i = 0; i < n; )
+    {
+      int consumed = setvlen(n - i);
+      asm volatile ("vmca va0, %0"
+                    :
+                    : "r" (&x[i]));
+      asm volatile ("la t0, vleaky_activate_h"
+                    :
+                    :
+                    : "t0");
+        asm volatile ("lw t1, 0(t0)");
+        asm volatile ("vf 0(t0)");
+        i += consumed;
+    }
+  asm volatile ("fence");
+
+}
+void logistic_activate_h(int16_t* x, const int n)
+{
+  float buf[1024];
+  for (int i = 0; i < n; )
+    {
+      int consumed = 1024 < n - i ? 1024 : n - i;
+      cvt_single_prec (&x[i], buf, consumed);
+      for (int j = 0; j < consumed; j++)
+        buf[j] = logistic_activate (buf[j]);
+      cvt_half_prec (buf, &x[i], consumed);
+      i += consumed;
+    }
+}
 
 void activate_array(float *x, const int n, const ACTIVATION a)
 {
-    int i;
-    for(i = 0; i < n; ++i){
-        x[i] = activate(x[i], a);
+  if (a == LEAKY)
+    {
+      leaky_activate_v(x, n);
     }
+  else if (a == LINEAR)
+    {
+      return;
+    }
+  else
+    {
+      int i;
+      for(i = 0; i < n; ++i){
+        x[i] = activate(x[i], a);
+      }
+    }
+}
+void activate_array_h(int16_t *x, const int n, const ACTIVATION a)
+{
+  if (a == LEAKY)
+    {
+      leaky_activate_vh(x, n);
+    }
+  else if (a == LINEAR)
+    {
+      return;
+    }
+  else if (a == LOGISTIC)
+    {
+      logistic_activate_h(x, n);
+    }
+
 }
 
 float gradient(float x, ACTIVATION a)
@@ -139,5 +230,4 @@ void gradient_array(const float *x, const int n, const ACTIVATION a, float *delt
     for(i = 0; i < n; ++i){
         delta[i] *= gradient(x[i], a);
     }
-} 
-
+}

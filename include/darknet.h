@@ -6,6 +6,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <stdint.h>
 #include <unistd.h>
 #include "util.h"
 #ifndef NO_PTHREAD
@@ -16,33 +17,8 @@
 #define SECRET_NUM -1234
 extern int gpu_index;
 
-#ifdef GPU
-    #define BLOCK 512
 
-    #include "cuda_runtime.h"
-    #include "curand.h"
-    #include "cublas_v2.h"
 
-    #ifdef CUDNN
-    #include "cudnn.h"
-    #endif
-#endif
-
-#ifndef __cplusplus
-    #ifdef OPENCV
-    #include "opencv2/highgui/highgui_c.h"
-    #include "opencv2/imgproc/imgproc_c.h"
-    #include "opencv2/core/version.hpp"
-    #if CV_MAJOR_VERSION == 3
-    #include "opencv2/videoio/videoio_c.h"
-    #include "opencv2/imgcodecs/imgcodecs_c.h"
-    #endif
-    #endif
-#endif
-
-#ifdef NO_PTHREAD
-static void pthread_join(int a, int b) { };
-#endif
 
 typedef struct{
     int classes;
@@ -127,6 +103,7 @@ struct layer{
     ACTIVATION activation;
     COST_TYPE cost_type;
     void (*forward)   (struct layer, struct network);
+    void (*forward_h)   (struct layer, struct network);
     void (*backward)  (struct layer, struct network);
     void (*update)    (struct layer, update_args);
     void (*forward_gpu)   (struct layer, struct network);
@@ -185,6 +162,9 @@ struct layer{
     int log;
     int tanh;
 
+  int* col_id_h;
+  int col_size;
+
     float alpha;
     float beta;
     float kappa;
@@ -230,16 +210,21 @@ struct layer{
     float * binary_weights;
 
     float * biases;
+    int16_t * biases_h;
     float * bias_updates;
 
     float * scales;
+  int16_t * scales_h;
     float * scale_updates;
 
     float * weights;
+  int16_t * weights_h;
     float * weight_updates;
 
     float * delta;
+  int16_t * delta_h;
     float * output;
+  int16_t * output_h;
     float * squared;
     float * norms;
 
@@ -251,9 +236,12 @@ struct layer{
     float * variance_delta;
 
     float * rolling_mean;
+  int16_t * rolling_mean_h;
     float * rolling_variance;
+  int16_t * rolling_variance_h;
 
     float * x;
+  int16_t * x_h;
     float * x_norm;
 
     float * m;
@@ -330,93 +318,6 @@ struct layer{
 
     size_t workspace_size;
 
-#ifdef GPU
-    int *indexes_gpu;
-
-    float *z_gpu;
-    float *r_gpu;
-    float *h_gpu;
-
-    float *temp_gpu;
-    float *temp2_gpu;
-    float *temp3_gpu;
-
-    float *dh_gpu;
-    float *hh_gpu;
-    float *prev_cell_gpu;
-    float *cell_gpu;
-    float *f_gpu;
-    float *i_gpu;
-    float *g_gpu;
-    float *o_gpu;
-    float *c_gpu;
-    float *dc_gpu; 
-
-    float *m_gpu;
-    float *v_gpu;
-    float *bias_m_gpu;
-    float *scale_m_gpu;
-    float *bias_v_gpu;
-    float *scale_v_gpu;
-
-    float * combine_gpu;
-    float * combine_delta_gpu;
-
-    float * prev_state_gpu;
-    float * forgot_state_gpu;
-    float * forgot_delta_gpu;
-    float * state_gpu;
-    float * state_delta_gpu;
-    float * gate_gpu;
-    float * gate_delta_gpu;
-    float * save_gpu;
-    float * save_delta_gpu;
-    float * concat_gpu;
-    float * concat_delta_gpu;
-
-    float * binary_input_gpu;
-    float * binary_weights_gpu;
-
-    float * mean_gpu;
-    float * variance_gpu;
-
-    float * rolling_mean_gpu;
-    float * rolling_variance_gpu;
-
-    float * variance_delta_gpu;
-    float * mean_delta_gpu;
-
-    float * x_gpu;
-    float * x_norm_gpu;
-    float * weights_gpu;
-    float * weight_updates_gpu;
-    float * weight_change_gpu;
-
-    float * biases_gpu;
-    float * bias_updates_gpu;
-    float * bias_change_gpu;
-
-    float * scales_gpu;
-    float * scale_updates_gpu;
-    float * scale_change_gpu;
-
-    float * output_gpu;
-    float * delta_gpu;
-    float * rand_gpu;
-    float * squared_gpu;
-    float * norms_gpu;
-#ifdef CUDNN
-    cudnnTensorDescriptor_t srcTensorDesc, dstTensorDesc;
-    cudnnTensorDescriptor_t dsrcTensorDesc, ddstTensorDesc;
-    cudnnTensorDescriptor_t normTensorDesc;
-    cudnnFilterDescriptor_t weightDesc;
-    cudnnFilterDescriptor_t dweightDesc;
-    cudnnConvolutionDescriptor_t convDesc;
-    cudnnConvolutionFwdAlgo_t fw_algo;
-    cudnnConvolutionBwdDataAlgo_t bd_algo;
-    cudnnConvolutionBwdFilterAlgo_t bf_algo;
-#endif
-#endif
 };
 
 void free_layer(layer);
@@ -434,6 +335,7 @@ typedef struct network{
     int subdivisions;
     layer *layers;
     float *output;
+  int16_t *output_h;
     learning_rate_policy policy;
 
     float learning_rate;
@@ -446,6 +348,7 @@ typedef struct network{
     int step;
     int max_batches;
     float *scales;
+  int16_t *scales_h;
     int   *steps;
     int num_steps;
     int burn_in;
@@ -476,6 +379,7 @@ typedef struct network{
     tree *hierarchy;
 
     float *input;
+  int16_t *input_h;
     float *truth;
     float *delta;
     float *workspace;
@@ -483,12 +387,6 @@ typedef struct network{
     int index;
     float *cost;
 
-#ifdef GPU
-    float *input_gpu;
-    float *truth_gpu;
-    float *delta_gpu;
-    float *output_gpu;
-#endif
 
 } network;
 
@@ -606,32 +504,14 @@ void update_network(network *net);
 
 void axpy_cpu(int N, float ALPHA, float *X, int INCX, float *Y, int INCY);
 void copy_cpu(int N, float *X, int INCX, float *Y, int INCY);
+void copy_cpu_h(int N, int16_t *X, int INCX, int16_t *Y, int INCY);
 void scal_cpu(int N, float ALPHA, float *X, int INCX);
 void normalize_cpu(float *x, float *mean, float *variance, int batch, int filters, int spatial);
+void normalize_cpu_h(int16_t *x, int16_t *mean, int16_t *variance, int batch, int filters, int spatial);
 void softmax(float *input, int n, float temp, int stride, float *output);
 
 int best_3d_shift_r(image a, image b, int min, int max);
-#ifdef GPU
-void axpy_gpu(int N, float ALPHA, float * X, int INCX, float * Y, int INCY);
-void fill_gpu(int N, float ALPHA, float * X, int INCX);
-void scal_gpu(int N, float ALPHA, float * X, int INCX);
-void copy_gpu(int N, float * X, int INCX, float * Y, int INCY);
 
-void cuda_set_device(int n);
-void cuda_free(float *x_gpu);
-float *cuda_make_array(float *x, size_t n);
-void cuda_pull_array(float *x_gpu, float *x, size_t n);
-float cuda_mag_array(float *x_gpu, size_t n);
-void cuda_push_array(float *x_gpu, float *x, size_t n);
-
-void forward_network_gpu(network *net);
-void backward_network_gpu(network *net);
-void update_network_gpu(network *net);
-
-float train_networks(network **nets, int n, data d, int interval);
-void sync_nets(network **nets, int n, int interval);
-void harmless_update_network_gpu(network *net);
-#endif
 void save_image_png(image im, const char *name);
 void get_next_batch(data d, int n, int offset, float *X, float *y);
 void grayscale_image_3c(image im);
@@ -721,6 +601,7 @@ matrix network_predict_data(network *net, data test);
 image **load_alphabet();
 image get_network_image(network *net);
 float *network_predict(network *net, float *input);
+int16_t* network_predict_half(network *net, int16_t *input);
 
 int network_width(network *net);
 int network_height(network *net);

@@ -3,7 +3,7 @@
 #include <time.h>
 #include <stdio.h>
 #include "util.h"
-
+#include <stdint.h>
 
 
 int __attribute__((optimize("O0"))) rdcycle() {
@@ -103,6 +103,33 @@ void vec_gather(const int* id, const float* src, float* dest, int len) {
     asm volatile ("fence");
 }
 
+void vec_gather_h(const int* id, const int16_t* src, int16_t* dest, int len) {
+    setvcfg(0, 1, 1, 2);
+    asm volatile ("la t0, vgather_h" : : : "t0");
+    asm volatile ("lw t1, 0(t0)");
+    for (int i = 0; i < len; ) {
+        int consumed = setvlen(len - i);
+
+        asm volatile ("vmcs vs1, %0"
+                      :
+                      : "r" (&src[0]));
+        asm volatile ("vmca va1, %0"
+                      :
+                      : "r" (&id[i]));
+        asm volatile ("vmca va2, %0"
+                      :
+                      : "r" (&dest[i]));
+        asm volatile ("la t0, vgather_h"
+                      :
+                      :
+                      : "t0");
+        asm volatile ("vf 0(t0)");
+        
+        i += consumed;
+    }
+    asm volatile ("fence");
+}
+
 void acc_gather(float* dest, int len, int stride, float* src,
                 int* ids, int n_iter) {
     setvcfg(0, 3, 0, 1);
@@ -142,5 +169,169 @@ void acc_gather(float* dest, int len, int stride, float* src,
     }
     asm volatile ("fence");
     printf("%d %d\n", rdcycle() - cycles, z);
+
+}
+
+void cvt_half_prec (float* src, int16_t* dest, int len)
+{
+  setvcfg(0, 1, 1, 1);
+    for (int i = 0; i < len; ) {
+        int consumed = setvlen(len - i);
+        asm volatile ("vmca va0, %0"
+                      :
+                      : "r" (&src[i]));
+        asm volatile ("vmca va1, %0"
+                      :
+                      : "r" (&dest[i]));
+        asm volatile ("la t0, vcvt_sh"
+                      :
+                      :
+                      : "t0");
+        asm volatile ("lw t1, 0(t0)");
+        asm volatile ("vf 0(t0)");
+        i += consumed;
+    }
+    asm volatile ("fence");
+}
+
+void cvt_single_prec (int16_t* src, float* dest, int len)
+{
+  setvcfg(0, 1, 1, 1);
+    for (int i = 0; i < len; ) {
+        int consumed = setvlen(len - i);
+        asm volatile ("vmca va0, %0"
+                      :
+                      : "r" (&src[i]));
+        asm volatile ("vmca va1, %0"
+                      :
+                      : "r" (&dest[i]));
+        asm volatile ("la t0, vcvt_hs"
+                      :
+                      :
+                      : "t0");
+        asm volatile ("lw t1, 0(t0)");
+        asm volatile ("vf 0(t0)");
+        i += consumed;
+    }
+    asm volatile ("fence");
+}
+
+void scalex (float* src, float a, int len)
+{
+  if (a > 0.999 && a < 1.001) return;
+  setvcfg(0, 1, 0, 1);
+    for (int i = 0; i < len; ) {
+        int consumed = setvlen(len - i);
+        asm volatile ("vmca va0, %0"
+                      :
+                      : "r" (&src[i]));
+        asm volatile ("vmcs vs1, %0"
+                      :
+                      : "r" (a));
+        asm volatile ("la t0, vscalex"
+                      :
+                      :
+                      : "t0");
+        asm volatile ("lw t1, 0(t0)");
+        asm volatile ("vf 0(t0)");
+        i += consumed;
+    }
+    asm volatile ("fence");
+}
+
+void scalex_h (int16_t* src, float a, int len)
+{
+  if (a > 0.999 && a < 1.001) return;
+  setvcfg(0, 0, 1, 1);
+    for (int i = 0; i < len; ) {
+        int consumed = setvlen(len - i);
+        asm volatile ("vmca va0, %0"
+                      :
+                      : "r" (&src[i]));
+        asm volatile ("vmcs vs1, %0"
+                      :
+                      : "r" (a));
+        asm volatile ("la t0, vscalex_h"
+                      :
+                      :
+                      : "t0");
+        asm volatile ("lw t1, 0(t0)");
+        asm volatile ("vf 0(t0)");
+        i += consumed;
+    }
+    asm volatile ("fence");
+
+}
+void addx (float* src, float a, int len)
+{
+  if (a > -0.001 && a < 0.001) return;
+  setvcfg(0, 1, 0, 1);
+    for (int i = 0; i < len; ) {
+        int consumed = setvlen(len - i);
+        asm volatile ("vmca va0, %0"
+                      :
+                      : "r" (&src[i]));
+        asm volatile ("vmcs vs1, %0"
+                      :
+                      : "r" (a));
+        asm volatile ("la t0, vaddx"
+                      :
+                      :
+                      : "t0");
+        asm volatile ("lw t1, 0(t0)");
+        asm volatile ("vf 0(t0)");
+        i += consumed;
+    }
+    asm volatile ("fence");
+}
+
+void addx_h (int16_t* src, int16_t a, int len)
+{
+  setvcfg(0, 0, 1, 1);
+    for (int i = 0; i < len; ) {
+        int consumed = setvlen(len - i);
+        asm volatile ("vmca va0, %0"
+                      :
+                      : "r" (&src[i]));
+        asm volatile ("vmcs vs1, %0"
+                      :
+                      : "r" (a));
+        asm volatile ("la t0, vaddx_h"
+                      :
+                      :
+                      : "t0");
+        asm volatile ("lw t1, 0(t0)");
+        asm volatile ("vf 0(t0)");
+        i += consumed;
+    }
+    asm volatile ("fence");
+
+}
+
+void hwacha_memcpy(int16_t* src, int16_t* dest, int len)
+{
+  if (len % sizeof(int16_t))
+    printf("ERROR\n");
+  int l = len / sizeof(int16_t);
+  setvcfg(0, 0, 1, 0);
+  for (int i = 0; i < l;)
+    {
+      int consumed = setvlen(l - i);
+        asm volatile ("vmca va0, %0"
+                      :
+                      : "r" (&src[i]));
+        asm volatile ("vmca va1, %0"
+                      :
+                      : "r" (&dest[i]));
+        asm volatile ("la t0, vhwacha_memcpy"
+                      :
+                      :
+                      : "t0");
+        asm volatile ("lw t1, 0(t0)");
+        asm volatile ("vf 0(t0)");
+        i += consumed;
+    }
+  asm volatile ("fence");
+  
 
 }
